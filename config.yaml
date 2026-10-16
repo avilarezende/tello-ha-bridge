@@ -1,0 +1,41 @@
+tello:
+  ip: "192.168.10.1"
+  # Velocidade padrão RC (0-100)
+  speed: 50
+  # Distância padrão para movimentos absolutos (cm)
+  move_distance_cm: 40
+  # Altura alvo em procedimentos de investigação (cm)
+  investigate_height_cm: 80
+
+home_assistant:
+  url: "http://homeassistant.local:8123"
+  # Preferir HA_TOKEN no .env
+  token: ""
+  # Entidade base usada no pacote HA
+  device_name: "tello_drone"
+
+mqtt:
+  host: "homeassistant.local"
+  port: 1883
+  username: ""
+  password: ""
+  topic_prefix: "tello"
+  # keep-alive segundos
+  keepalive: 60
+
+ai:
+  # Tempo máximo de um procedimento (segundos)
+  procedure_timeout_s: 120
+  # Intervalo entre passos de investigação (segundos)
+  step_delay_s: 2.0
+  # Procedimentos disponíveis (nomes = payloads MQTT/HA)
+  procedures:
+    - hover_scan
+    - square_patrol
+    - forward_investigate
+    - land_safe
+
+app:
+  window_title: "Tello Control — Manual / IA / Home Assistant"
+  theme: "dark"
+  refresh_ms: 500

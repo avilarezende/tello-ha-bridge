@@ -1,0 +1,100 @@
+# Pacote sugerido para o Home Assistant
+# Copie para config/packages/tello_drone.yaml (habilite packages no configuration.yaml)
+#
+# O app publica estados via REST e MQTT. Use estes helpers para enviar ordens.
+
+input_select:
+  tello_mode:
+    name: Tello Modo
+    options:
+      - manual
+      - ai
+    initial: manual
+    icon: mdi:drone
+  tello_procedure:
+    name: Tello Procedimento IA
+    options:
+      - hover_scan
+      - square_patrol
+      - forward_investigate
+      - land_safe
+    initial: hover_scan
+    icon: mdi:radar
+
+input_button:
+  tello_run_procedure:
+    name: Executar procedimento Tello
+    icon: mdi:play
+  tello_land:
+    name: Pousar Tello
+    icon: mdi:airplane-landing
+  tello_takeoff:
+    name: Decolar Tello
+    icon: mdi:airplane-takeoff
+
+automation:
+  - id: tello_set_mode_mqtt
+    alias: "Tello — publicar modo"
+    trigger:
+      - platform: state
+        entity_id: input_select.tello_mode
+    action:
+      - service: mqtt.publish
+        data:
+          topic: tello/mode
+          payload_template: '{"value": "{{ states(''input_select.tello_mode'') }}"}'
+
+  - id: tello_run_procedure_mqtt
+    alias: "Tello — executar procedimento"
+    trigger:
+      - platform: state
+        entity_id: input_button.tello_run_procedure
+    action:
+      - service: mqtt.publish
+        data:
+          topic: tello/ai/procedure
+          payload_template: '{"value": "{{ states(''input_select.tello_procedure'') }}"}'
+
+  - id: tello_land_mqtt
+    alias: "Tello — pousar"
+    trigger:
+      - platform: state
+        entity_id: input_button.tello_land
+    action:
+      - service: mqtt.publish
+        data:
+          topic: tello/command
+          payload: '{"value": "land"}'
+
+  - id: tello_takeoff_mqtt
+    alias: "Tello — decolar"
+    trigger:
+      - platform: state
+        entity_id: input_button.tello_takeoff
+    action:
+      - service: mqtt.publish
+        data:
+          topic: tello/command
+          payload: '{"value": "takeoff"}'
+
+mqtt:
+  sensor:
+    - name: "Tello Battery MQTT"
+      unique_id: tello_battery_mqtt
+      state_topic: "tello/battery"
+      unit_of_measurement: "%"
+      device_class: battery
+    - name: "Tello Mode MQTT"
+      unique_id: tello_mode_mqtt
+      state_topic: "tello/mode/state"
+    - name: "Tello AI Status MQTT"
+      unique_id: tello_ai_status_mqtt
+      state_topic: "tello/ai/status"
+      value_template: "{{ value_json.message }}"
+  binary_sensor:
+    - name: "Tello Connected MQTT"
+      unique_id: tello_connected_mqtt
+      state_topic: "tello/connected"
+      payload_on: "ON"
+      payload_off: "OFF"
+      device_class: connectivity

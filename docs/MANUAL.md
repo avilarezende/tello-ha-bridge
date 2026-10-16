@@ -1,5 +1,7 @@
 # Manual completo — Tello / Tello EDU + App Python + Home Assistant
 
+Repositório: https://github.com/avilarezende/tello-ha-bridge
+
 Este manual cobre **tudo** que você precisa para colocar o drone no ar, o aplicativo no PC e o Home Assistant (HA) enviando ordens de investigação com IA.
 
 ---

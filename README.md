@@ -42,7 +42,18 @@ pytest -q
 ruff check tello_bridge tests main.py
 ```
 
-O GitHub Actions (`.github/workflows/ci.yml`) roda lint + testes em Python 3.10–3.12 e valida o YAML do HA.
+O workflow está em `.github/workflows/ci.yml` (cópia também em `.github-ci-pending/` se o push do Actions ainda precisar do escopo OAuth `workflow`).
+
+Para ativar o Actions no GitHub (uma vez):
+
+```powershell
+gh auth refresh -h github.com -s workflow
+git add .github/workflows/ci.yml
+git commit -m "ci: enable GitHub Actions"
+git push
+```
+
+O pipeline roda lint + testes em Python 3.10–3.12 e valida o YAML do HA.
 
 ## Estrutura
 

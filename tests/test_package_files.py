@@ -29,3 +29,25 @@ def test_manual_exists_and_mentions_edu():
 def test_readme_links_manual():
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     assert "docs/MANUAL.md" in readme
+
+
+def test_security_doc_exists():
+    path = ROOT / "SECURITY.md"
+    assert path.is_file()
+    text = path.read_text(encoding="utf-8")
+    assert "OWASP" in text
+    assert "MQTT" in text
+
+
+def test_ha_package_sets_ai_before_procedure():
+    path = ROOT / "homeassistant" / "tello_package.yaml"
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    run = next(a for a in data["automation"] if a["id"] == "tello_run_procedure_mqtt")
+    topics = [
+        step["data"]["topic"]
+        for step in run["action"]
+        if isinstance(step, dict) and step.get("service") == "mqtt.publish"
+    ]
+    assert "tello/mode" in topics
+    assert "tello/ai/procedure" in topics
+    assert topics.index("tello/mode") < topics.index("tello/ai/procedure")

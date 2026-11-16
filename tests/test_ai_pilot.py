@@ -55,4 +55,14 @@ def test_unknown_procedure_sets_message():
     pilot.start_procedure("nao_existe")
     if pilot._thread:
         pilot._thread.join(timeout=3)
-    assert "desconhecido" in pilot.status.message.lower()
+    msg = pilot.status.message.lower()
+    assert "desconhecido" in msg or "não permitido" in msg or "nao permitido" in msg
+
+
+def test_garbage_cm_does_not_crash():
+    pilot, tello = _pilot()
+    pilot.set_active(True)
+    pilot.handle_order("command", {"value": "forward", "cm": "abc"})
+    tello.move.assert_called()
+    dist = tello.move.call_args[0][1]
+    assert 20 <= dist <= 500

@@ -9,6 +9,14 @@ from typing import Any, Callable
 from tello_bridge.ai_pilot import AIPilot, AIStatus
 from tello_bridge.ha_client import HomeAssistantClient
 from tello_bridge.mqtt_bridge import MqttBridge
+from tello_bridge.security import (
+    ALLOWED_PROCEDURES,
+    SAFETY_COMMANDS,
+    RateLimiter,
+    command_secret_ok,
+    redact_mapping,
+    sanitize_device_name,
+)
 from tello_bridge.tello_client import TelloClient, TelloTelemetry
 
 logger = logging.getLogger(__name__)
@@ -28,15 +36,37 @@ class AppController:
         ha_cfg = cfg.get("home_assistant", {})
         mqtt_cfg = cfg.get("mqtt", {})
         ai_cfg = cfg.get("ai", {})
+        sec_cfg = cfg.get("security", {})
+
+        self._command_secret = str(mqtt_cfg.get("command_secret", "") or "")
+        self._allow_remote_mode_switch = bool(
+            mqtt_cfg.get("allow_remote_mode_switch", True)
+        )
+        self._battery_land_percent = int(sec_cfg.get("battery_land_percent", 15))
+        self._land_on_disconnect = bool(sec_cfg.get("land_on_disconnect", True))
+        self._battery_land_done = False
+        self._rate_limiter = RateLimiter(
+            max_events=int(mqtt_cfg.get("rate_limit_max", 10)),
+            window_s=float(mqtt_cfg.get("rate_limit_window_s", 5.0)),
+        )
+
+        allowed_procs = ai_cfg.get("procedures") or list(ALLOWED_PROCEDURES)
+        allowed_procs = [p for p in allowed_procs if p in ALLOWED_PROCEDURES]
+
+        device_name = sanitize_device_name(
+            str(ha_cfg.get("device_name", "tello_drone"))
+        )
 
         self.tello = TelloClient(
             ip=str(tello_cfg.get("ip", "192.168.10.1")),
             speed=int(tello_cfg.get("speed", 50)),
+            land_on_disconnect=self._land_on_disconnect,
         )
         self.ha = HomeAssistantClient(
             url=str(ha_cfg.get("url", "http://homeassistant.local:8123")),
             token=str(ha_cfg.get("token", "")),
-            device_name=str(ha_cfg.get("device_name", "tello_drone")),
+            device_name=device_name,
+            verify_tls=bool(ha_cfg.get("verify_tls", True)),
         )
         self.mqtt = MqttBridge(
             host=str(mqtt_cfg.get("host", "homeassistant.local")),
@@ -45,6 +75,8 @@ class AppController:
             password=str(mqtt_cfg.get("password", "")),
             topic_prefix=str(mqtt_cfg.get("topic_prefix", "tello")),
             keepalive=int(mqtt_cfg.get("keepalive", 60)),
+            tls=bool(mqtt_cfg.get("tls", False)),
+            tls_insecure=bool(mqtt_cfg.get("tls_insecure", False)),
         )
         self.ai = AIPilot(
             tello=self.tello,
@@ -53,6 +85,8 @@ class AppController:
             step_delay_s=float(ai_cfg.get("step_delay_s", 2.0)),
             procedure_timeout_s=float(ai_cfg.get("procedure_timeout_s", 120)),
             on_status=self._on_ai_status,
+            allowed_procedures=allowed_procs,
+            land_on_error=bool(sec_cfg.get("land_on_ai_error", True)),
         )
 
         self.mode = ControlMode.MANUAL
@@ -84,13 +118,19 @@ class AppController:
     def shutdown(self) -> None:
         self._publish_stop.set()
         self.ai.cancel()
+        # Failsafe: pousar antes de encerrar se ainda voando
+        if self.tello.telemetry.flying:
+            logger.warning("Shutdown com drone voando — pousando")
+            self.tello.land()
         self.tello.disconnect()
         self.mqtt.disconnect()
+        self.ha.close()
 
     def connect_tello(self, with_video: bool = True) -> bool:
         ok = self.tello.connect()
         if ok and with_video:
             self.tello.start_video()
+        self._battery_land_done = False
         self._publish_state()
         self._notify()
         return ok
@@ -160,8 +200,29 @@ class AppController:
 
     def _on_mqtt_command(self, kind: str, payload: dict[str, Any]) -> None:
         # kind vem do último segmento: command | procedure | mode
-        logger.info("MQTT %s %s", kind, payload)
+        safe_payload = redact_mapping(payload)
+        logger.info("MQTT %s %s", kind, safe_payload)
+
+        # Failsafe land/emergency: sempre (mesmo sem secret / fora do rate limit)
+        if kind == "command":
+            cmd = str(payload.get("value") or payload.get("cmd") or "").lower().strip()
+            if cmd in SAFETY_COMMANDS:
+                getattr(self.tello, cmd)()
+                self._notify()
+                return
+
+        if not command_secret_ok(payload, self._command_secret):
+            logger.warning("MQTT rejeitado: command_secret inválido (%s)", kind)
+            return
+
+        if not self._rate_limiter.allow():
+            logger.warning("MQTT rate limit — comando ignorado: %s", kind)
+            return
+
         if kind == "mode":
+            if not self._allow_remote_mode_switch:
+                logger.warning("MQTT mode rejeitado: allow_remote_mode_switch=false")
+                return
             value = str(payload.get("value", "")).lower()
             if value in ("manual", "ai"):
                 self.set_mode(value)
@@ -169,18 +230,22 @@ class AppController:
                 self.ai.handle_order("mode", payload)
             return
         if kind == "command":
-            cmd = str(payload.get("value") or payload.get("cmd") or "").lower()
-            # segurança: land/emergency sempre
-            if cmd in ("land", "emergency"):
-                getattr(self.tello, cmd)()
-                self._notify()
-                return
+            cmd = str(payload.get("value") or payload.get("cmd") or "").lower().strip()
             if self.mode == ControlMode.AI:
                 self.ai.handle_order("command", payload)
+            else:
+                logger.info("MQTT command '%s' ignorado — modo manual", cmd)
             return
         if kind == "procedure":
             if self.mode != ControlMode.AI:
-                self.set_mode(ControlMode.AI)
+                if self._allow_remote_mode_switch:
+                    self.set_mode(ControlMode.AI)
+                else:
+                    logger.warning(
+                        "MQTT procedure rejeitado: modo não é IA "
+                        "(defina modo via GUI ou allow_remote_mode_switch)"
+                    )
+                    return
             self.ai.handle_order("procedure", payload)
 
     def _on_ai_status(self, status: AIStatus) -> None:
@@ -196,6 +261,36 @@ class AppController:
         )
         self._notify()
 
+    def _maybe_battery_failsafe(self, t: TelloTelemetry) -> None:
+        try:
+            battery = int(t.battery)
+        except (TypeError, ValueError):
+            return
+        if (
+            bool(t.connected)
+            and bool(t.flying)
+            and battery > 0
+            and battery <= self._battery_land_percent
+            and not self._battery_land_done
+        ):
+            self._battery_land_done = True
+            logger.warning(
+                "Bateria %s%% ≤ %s%% — failsafe pouso",
+                battery,
+                self._battery_land_percent,
+            )
+            self.tello.land()
+            self.mqtt.publish(
+                "ai/status",
+                {
+                    "active": self.ai.status.active,
+                    "procedure": "battery_failsafe",
+                    "step": "land",
+                    "message": f"Pouso automático: bateria {battery}%",
+                    "running": False,
+                },
+            )
+
     def _publish_loop(self) -> None:
         while not self._publish_stop.wait(2.0):
             self._publish_state()
@@ -206,6 +301,7 @@ class AppController:
 
     def _publish_state(self) -> None:
         t: TelloTelemetry = self.tello.telemetry
+        self._maybe_battery_failsafe(t)
         payload = {
             "connected": t.connected,
             "battery": t.battery,

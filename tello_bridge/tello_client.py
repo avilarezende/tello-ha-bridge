@@ -32,9 +32,15 @@ class TelloTelemetry:
 class TelloClient:
     """Wrapper do DJI Tello com telemetria e frames de vídeo."""
 
-    def __init__(self, ip: str = "192.168.10.1", speed: int = 50) -> None:
+    def __init__(
+        self,
+        ip: str = "192.168.10.1",
+        speed: int = 50,
+        land_on_disconnect: bool = True,
+    ) -> None:
         self.ip = ip
-        self.speed = speed
+        self.speed = int(np.clip(speed, 10, 100))
+        self.land_on_disconnect = land_on_disconnect
         self._drone = None
         self.telemetry = TelloTelemetry()
         self._lock = threading.RLock()
@@ -84,6 +90,13 @@ class TelloClient:
         with self._lock:
             if self._drone is None:
                 return
+            if self.land_on_disconnect and self.telemetry.flying:
+                try:
+                    logger.warning("Desconectando com drone voando — pousando")
+                    self._drone.land()
+                    self.telemetry.flying = False
+                except Exception:  # noqa: BLE001
+                    logger.exception("Pouso no disconnect falhou")
             try:
                 if self.telemetry.video_on:
                     self._drone.streamoff()

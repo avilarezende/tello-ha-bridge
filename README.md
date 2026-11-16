@@ -67,6 +67,10 @@ tests/                 # pytest
 .github/workflows/ci.yml
 ```
 
+## Segurança
+
+Veja [SECURITY.md](SECURITY.md) (OWASP / hardening MQTT·TLS·secrets·failsafe).
+
 ## Licença
 
 MIT — veja [LICENSE](LICENSE).

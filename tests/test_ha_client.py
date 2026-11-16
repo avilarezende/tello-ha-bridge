@@ -26,3 +26,24 @@ def test_check_connection_ok(mock_session_cls):
     assert client.check_connection() is True
     assert client.status.connected is True
     assert client.status.version == "2024.1.0"
+
+
+@patch("tello_bridge.ha_client.requests.Session")
+def test_http_error_does_not_leak_body(mock_session_cls):
+    session = MagicMock()
+    mock_session_cls.return_value = session
+    resp = MagicMock()
+    resp.status_code = 401
+    resp.text = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.secret"
+    session.get.return_value = resp
+
+    client = HomeAssistantClient("http://ha.local:8123", token="abc")
+    assert client.check_connection() is False
+    assert "eyJ" not in client.status.last_error
+    assert "HTTP 401" in client.status.last_error
+
+
+def test_set_state_rejects_bad_entity():
+    client = HomeAssistantClient("http://ha.local:8123", token="abc")
+    assert client.set_state("../evil", "on") is False
+    assert "inválido" in client.status.last_error.lower() or "invalido" in client.status.last_error.lower()

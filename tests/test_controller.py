@@ -25,9 +25,30 @@ def _cfg() -> dict:
             "password": "",
             "topic_prefix": "tello",
             "keepalive": 60,
+            "allow_remote_mode_switch": True,
+            "command_secret": "",
+            "rate_limit_max": 50,
+            "rate_limit_window_s": 5.0,
         },
         "ai": {"step_delay_s": 0.01, "procedure_timeout_s": 5, "procedures": ["land_safe"]},
+        "security": {
+            "battery_land_percent": 15,
+            "land_on_ai_error": True,
+            "land_on_disconnect": True,
+        },
     }
+
+
+def _wire_tello_telemetry(tello: MagicMock) -> None:
+    tello.telemetry.connected = False
+    tello.telemetry.flying = False
+    tello.telemetry.battery = 100
+    tello.telemetry.height_cm = 0
+    tello.telemetry.temperature = 0.0
+    tello.telemetry.video_on = False
+    tello.telemetry.pitch = 0
+    tello.telemetry.roll = 0
+    tello.telemetry.yaw = 0
 
 
 @patch("tello_bridge.controller.MqttBridge")
@@ -36,7 +57,9 @@ def _cfg() -> dict:
 def test_set_mode_toggles_ai(mock_tello, mock_ha, mock_mqtt):
     mock_mqtt.return_value = MagicMock()
     mock_ha.return_value = MagicMock()
-    mock_tello.return_value = MagicMock()
+    tello = MagicMock()
+    _wire_tello_telemetry(tello)
+    mock_tello.return_value = tello
 
     ctrl = AppController(_cfg())
     ctrl.set_mode(ControlMode.AI)
@@ -53,6 +76,7 @@ def test_set_mode_toggles_ai(mock_tello, mock_ha, mock_mqtt):
 @patch("tello_bridge.controller.TelloClient")
 def test_manual_blocked_in_ai_mode(mock_tello, mock_ha, mock_mqtt):
     tello = MagicMock()
+    _wire_tello_telemetry(tello)
     mock_tello.return_value = tello
     mock_mqtt.return_value = MagicMock()
     mock_ha.return_value = MagicMock()
@@ -68,6 +92,7 @@ def test_manual_blocked_in_ai_mode(mock_tello, mock_ha, mock_mqtt):
 @patch("tello_bridge.controller.TelloClient")
 def test_land_always_allowed(mock_tello, mock_ha, mock_mqtt):
     tello = MagicMock()
+    _wire_tello_telemetry(tello)
     tello.land.return_value = True
     mock_tello.return_value = tello
     mock_mqtt.return_value = MagicMock()
@@ -83,7 +108,9 @@ def test_land_always_allowed(mock_tello, mock_ha, mock_mqtt):
 @patch("tello_bridge.controller.HomeAssistantClient")
 @patch("tello_bridge.controller.TelloClient")
 def test_mqtt_mode_command(mock_tello, mock_ha, mock_mqtt):
-    mock_tello.return_value = MagicMock()
+    tello = MagicMock()
+    _wire_tello_telemetry(tello)
+    mock_tello.return_value = tello
     mock_mqtt.return_value = MagicMock()
     mock_ha.return_value = MagicMock()
 

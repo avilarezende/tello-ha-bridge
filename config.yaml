@@ -8,11 +8,14 @@ tello:
   investigate_height_cm: 80
 
 home_assistant:
+  # Prefira HTTPS na LAN quando disponível
   url: "http://homeassistant.local:8123"
-  # Preferir HA_TOKEN no .env
+  # NUNCA coloque o token aqui — use HA_TOKEN no .env
   token: ""
-  # Entidade base usada no pacote HA
+  # Entidade base usada no pacote HA (apenas [a-z0-9_])
   device_name: "tello_drone"
+  # Validar certificado TLS (false só em lab com self-signed)
+  verify_tls: true
 
 mqtt:
   host: "homeassistant.local"
@@ -22,6 +25,25 @@ mqtt:
   topic_prefix: "tello"
   # keep-alive segundos
   keepalive: 60
+  # TLS (porta típica 8883). Preferir true em redes não isoladas.
+  tls: false
+  tls_insecure: false
+  # Segredo compartilhado opcional nos payloads MQTT (campo "secret")
+  command_secret: ""
+  # true = HA pode trocar modo / iniciar procedure (necessário para o pacote HA).
+  # false = só a GUI local muda o modo (mais restrito; hardening).
+  allow_remote_mode_switch: true
+  # Rate limit de comandos MQTT (failsafe land/emergency isentos)
+  rate_limit_max: 10
+  rate_limit_window_s: 5.0
+
+security:
+  # Pouso automático se bateria ≤ este % (com drone voando)
+  battery_land_percent: 15
+  # Pouso se procedimento IA lançar exceção
+  land_on_ai_error: true
+  # Tentar pousar ao desconectar enquanto voando
+  land_on_disconnect: true
 
 ai:
   # Tempo máximo de um procedimento (segundos)

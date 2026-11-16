@@ -4,7 +4,9 @@ import logging
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Callable, Collection
+
+from tello_bridge.security import ALLOWED_COMMANDS, ALLOWED_PROCEDURES, parse_int_clamped
 
 if TYPE_CHECKING:
     from tello_bridge.tello_client import TelloClient
@@ -34,6 +36,8 @@ class AIPilot:
         step_delay_s: float = 2.0,
         procedure_timeout_s: float = 120.0,
         on_status: Callable[[AIStatus], None] | None = None,
+        allowed_procedures: Collection[str] | None = None,
+        land_on_error: bool = True,
     ) -> None:
         self.tello = tello
         self.move_distance_cm = move_distance_cm
@@ -41,6 +45,8 @@ class AIPilot:
         self.step_delay_s = step_delay_s
         self.procedure_timeout_s = procedure_timeout_s
         self.on_status = on_status
+        self.allowed_procedures = frozenset(allowed_procedures or ALLOWED_PROCEDURES)
+        self.land_on_error = land_on_error
         self.status = AIStatus()
         self._thread: threading.Thread | None = None
         self._cancel = threading.Event()
@@ -66,8 +72,10 @@ class AIPilot:
 
     def handle_order(self, kind: str, payload: dict) -> None:
         """kind: command | procedure | mode"""
-        self.status.last_order = f"{kind}:{payload}"
-        self._log(f"Ordem recebida: {kind} {payload}")
+        # Não guarda payload bruto (pode conter secret)
+        safe_keys = {k: v for k, v in payload.items() if k not in ("secret", "token")}
+        self.status.last_order = f"{kind}:{safe_keys}"
+        self._log(f"Ordem recebida: {kind} {safe_keys}")
 
         if kind == "mode":
             value = str(payload.get("value", "")).lower()
@@ -85,10 +93,16 @@ class AIPilot:
             return
 
         if kind == "command":
-            cmd = str(payload.get("value") or payload.get("cmd") or "").lower()
+            cmd = str(payload.get("value") or payload.get("cmd") or "").lower().strip()
             self._run_single_command(cmd, payload)
 
     def start_procedure(self, name: str) -> None:
+        name = (name or "").strip()
+        if name not in self.allowed_procedures:
+            self.status.message = f"Procedimento não permitido: {name}"
+            self._log(self.status.message)
+            self._emit()
+            return
         with self._lock:
             if self.status.running:
                 self.cancel()
@@ -105,8 +119,13 @@ class AIPilot:
             self._thread.start()
 
     def _run_single_command(self, cmd: str, payload: dict) -> None:
-        dist = int(payload.get("cm", self.move_distance_cm))
-        deg = int(payload.get("degrees", 90))
+        if cmd not in ALLOWED_COMMANDS:
+            self._log(f"Comando desconhecido/bloqueado: {cmd}")
+            return
+        dist = parse_int_clamped(
+            payload.get("cm", self.move_distance_cm), self.move_distance_cm, 20, 500
+        )
+        deg = parse_int_clamped(payload.get("degrees", 90), 90, 1, 360)
         actions = {
             "takeoff": self.tello.takeoff,
             "land": self.tello.land,
@@ -132,6 +151,7 @@ class AIPilot:
 
     def _run_procedure(self, name: str) -> None:
         deadline = time.time() + self.procedure_timeout_s
+        errored = False
         try:
             if name == "hover_scan":
                 self._proc_hover_scan(deadline)
@@ -146,13 +166,25 @@ class AIPilot:
                 self.status.message = f"Procedimento desconhecido: {name}"
                 self._log(self.status.message)
         except Exception as exc:  # noqa: BLE001
-            self.status.message = f"Erro na IA: {exc}"
+            errored = True
+            self.status.message = f"Erro na IA: {type(exc).__name__}"
             logger.exception("Procedimento IA falhou")
         finally:
-            self.tello.hover()
+            if errored and self.land_on_error and self.tello.telemetry.flying:
+                self._step("failsafe_land", "Failsafe: pouso após erro da IA")
+                try:
+                    self.tello.land()
+                except Exception:  # noqa: BLE001
+                    logger.exception("Failsafe land falhou")
+            else:
+                self.tello.hover()
             self.status.running = False
             self.status.step = "done"
-            if "Erro" not in self.status.message and "desconhecido" not in self.status.message:
+            if (
+                "Erro" not in self.status.message
+                and "desconhecido" not in self.status.message
+                and "não permitido" not in self.status.message
+            ):
                 self.status.message = f"Concluído: {name}"
             self._emit()
 

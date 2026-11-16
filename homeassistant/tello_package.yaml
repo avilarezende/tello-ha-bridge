@@ -1,6 +1,11 @@
 # Pacote sugerido para o Home Assistant
 # Copie para config/packages/tello_drone.yaml (habilite packages no configuration.yaml)
 #
+# Segurança (OWASP):
+# - Restrinja ACL no Mosquitto: só o app assina tello/command|mode|ai/procedure
+# - Prefira MQTT com autenticação + TLS (8883)
+# - Se MQTT_COMMAND_SECRET estiver definido no app, inclua "secret" nos payloads abaixo
+#
 # O app publica estados via REST e MQTT. Use estes helpers para enviar ordens.
 
 input_select:
@@ -50,6 +55,12 @@ automation:
       - platform: state
         entity_id: input_button.tello_run_procedure
     action:
+      # Garante modo IA antes do procedimento (não depende de auto-escalonamento)
+      - service: mqtt.publish
+        data:
+          topic: tello/mode
+          payload: '{"value": "ai"}'
+      - delay: "00:00:01"
       - service: mqtt.publish
         data:
           topic: tello/ai/procedure
@@ -72,6 +83,11 @@ automation:
       - platform: state
         entity_id: input_button.tello_takeoff
     action:
+      - service: input_select.select_option
+        data:
+          entity_id: input_select.tello_mode
+          option: ai
+      - delay: "00:00:01"
       - service: mqtt.publish
         data:
           topic: tello/command

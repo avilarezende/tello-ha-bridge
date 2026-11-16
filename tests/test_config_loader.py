@@ -68,3 +68,26 @@ mqtt:
     assert cfg["mqtt"]["host"] == "new-mqtt"
     assert cfg["mqtt"]["port"] == 1884
     assert cfg["tello"]["ip"] == "10.0.0.9"
+    assert "security" in cfg
+    assert cfg["home_assistant"]["device_name"] == "tello_drone"
+
+
+def test_device_name_sanitized(tmp_path: Path, monkeypatch):
+    cfg_file = tmp_path / "config.yaml"
+    cfg_file.write_text(
+        """
+tello:
+  ip: "192.168.10.1"
+home_assistant:
+  url: "http://ha.local:8123"
+  token: ""
+  device_name: "../Evil Name!"
+mqtt:
+  host: "ha.local"
+  port: 1883
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("HA_TOKEN", raising=False)
+    cfg = load_config(cfg_file)
+    assert cfg["home_assistant"]["device_name"] == "tello_drone"

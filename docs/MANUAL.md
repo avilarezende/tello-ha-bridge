@@ -502,11 +502,16 @@ O canal HA → app controla um **dispositivo físico**. Trate-o como superfície
       - **MQTT:** **`mqtt.tls: true`** no app (ex.: Mosquitto com TLS na porta
         8883, equivale a `MQTT_TLS=true`). Sem TLS, credenciais trafegam em
         claro na LAN.
-- [ ] **A05 — Configuração:** restrinja o broker MQTT à LAN (firewall), exija
-      usuário/senha no Mosquitto e desative acesso anônimo. Nunca exponha as
-      portas 8123/1883 na internet sem VPN. Segredos **somente** no `.env`
-      (nunca no `config.yaml`, que é versionado — o app avisa em log se
-      encontrar).
+- [ ] **A05 — Configuração:** restrinja o broker MQTT à LAN, faça exames de
+      segurança:
+      - Firewall: bloqueie as portas do drone (`8889`, `8890`, `11111`) para
+        todos exceto o app, e as portas MQTT/REST do drone (`1883`, `8883`)
+        para a rede LAN do drone/HA. Não exponha 8123/1883/8883 na internet
+        sem VPN.
+      - Broker Mosquitto: exija usuário/senha (defina no Mosquitto + no
+        `.env`/app), desative `allow_anonymous`, remova access rules
+        ampliadas. Segredos **somente** no `.env` (nunca no `config.yaml`,
+        que é versionado — o app avisa em log se encontrar).
 - [ ] **A06 — Componentes:** dependências têm upper bounds no `requirements.txt`;
       rode `pip-audit` (está no CI) e atualize com frequência.
 - [ ] **A09 — Logs:** o app registra comandos rejeitados e avisos de canal aberto

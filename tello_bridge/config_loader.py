@@ -54,7 +54,8 @@ def load_config(path: Path | None = None) -> dict[str, Any]:
     if os.getenv("MQTT_HOST"):
         mqtt["host"] = os.getenv("MQTT_HOST")
     if os.getenv("MQTT_PORT"):
-        mqtt["port"] = _env_int("MQTT_PORT", 1883)
+        default_port = 8883 if _env_bool("MQTT_TLS") else 1883
+        mqtt["port"] = _env_int("MQTT_PORT", default_port)
     if os.getenv("MQTT_USER") is not None:
         mqtt["username"] = os.getenv("MQTT_USER", "")
     if os.getenv("MQTT_PASSWORD") is not None:

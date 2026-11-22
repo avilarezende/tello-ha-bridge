@@ -79,6 +79,15 @@ def test_invalid_mqtt_port_falls_back_to_default(tmp_path: Path, monkeypatch):
     assert cfg["mqtt"]["port"] == 1883
 
 
+def test_mqtt_tls_invalid_port_falls_back_to_8883(tmp_path: Path, monkeypatch):
+    cfg_file = tmp_path / "config.yaml"
+    cfg_file.write_text("mqtt:\n  host: x\n", encoding="utf-8")
+    monkeypatch.setenv("MQTT_TLS", "true")
+    monkeypatch.setenv("MQTT_PORT", "abc")
+    cfg = load_config(cfg_file)
+    assert cfg["mqtt"]["port"] == 8883
+
+
 def test_security_env_overrides(tmp_path: Path, monkeypatch):
     cfg_file = tmp_path / "config.yaml"
     cfg_file.write_text("mqtt:\n  host: x\n", encoding="utf-8")

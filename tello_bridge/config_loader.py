@@ -72,6 +72,8 @@ def load_config(path: Path | None = None) -> dict[str, Any]:
         tello["ip"] = os.getenv("TELLO_IP")
     if os.getenv("MIN_BATTERY_PCT"):
         tello["min_battery_pct"] = _env_int("MIN_BATTERY_PCT", 15)
+    if os.getenv("CRITICAL_BATTERY_PCT"):
+        tello["critical_battery_pct"] = _env_int("CRITICAL_BATTERY_PCT", 10)
 
     # A05: segredos em texto claro no config.yaml correm risco de ir pro Git.
     if ha.get("token"):

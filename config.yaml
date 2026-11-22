@@ -8,6 +8,8 @@ tello:
   investigate_height_cm: 80
   # Bateria mínima (%) para decolar ou iniciar procedimento de voo
   min_battery_pct: 15
+  # Bateria CRÍTICA (%) para alertar no HA (persistent_notification)
+  critical_battery_pct: 10
 
 home_assistant:
   url: "http://homeassistant.local:8123"

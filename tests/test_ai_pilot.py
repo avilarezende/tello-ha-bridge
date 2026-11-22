@@ -128,6 +128,41 @@ def test_malformed_payload_does_not_crash():
     tello.takeoff.assert_not_called()
 
 
+def test_battery_low_notifies_and_dedupes():
+    calls: list = []
+
+    def on_security(message: str, level: str) -> None:
+        calls.append((message, level))
+
+    pilot, tello = _pilot(min_battery_pct=15, on_security=on_security)
+    tello.telemetry.connected = True
+    tello.telemetry.battery = 5
+
+    assert pilot.battery_low() is True
+    assert len(calls) == 2  # fraca + crítica
+    assert "Bateria fraca" in calls[0][0]
+    assert "CRÍTICA" in calls[1][0]
+
+    # dedup: nada muda → não notifica novamente
+    assert pilot.battery_low() is True
+    assert len(calls) == 2
+
+    # reset: recarregar zera os estados; baixar denovo notifica de novo
+    tello.telemetry.battery = 50
+    assert pilot.battery_low() is False
+    tello.telemetry.battery = 5
+    assert pilot.battery_low() is True
+    assert len(calls) == 4
+
+
+def test_battery_low_notifies_disabled_without_handler():
+    pilot, tello = _pilot()
+    tello.telemetry.connected = True
+    tello.telemetry.battery = 5
+    # sem on_security: não deve lançar
+    assert pilot.battery_low() is True
+
+
 def test_cancel_is_not_overwritten_by_done():
     # step_delay longo garante que o cancel chega com o procedimento em andamento
     pilot, tello = _pilot(step_delay_s=5)

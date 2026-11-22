@@ -128,6 +128,58 @@ def test_takeoff_allowed_with_good_battery(mock_tello, mock_ha, mock_mqtt):
 @patch("tello_bridge.controller.MqttBridge")
 @patch("tello_bridge.controller.HomeAssistantClient")
 @patch("tello_bridge.controller.TelloClient")
+def test_notify_security_via_ha(mock_tello, mock_ha, mock_mqtt):
+    mock_tello.return_value = MagicMock()
+    mock_ha.return_value = MagicMock()
+    mock_ha.return_value.token = "tok"
+    mock_mqtt.return_value = MagicMock()
+
+    ctrl = AppController(_cfg())
+    ctrl.notify_security("Bateria fraca", notification_id="test-id")
+    mock_ha.return_value.call_service.assert_called_once_with(
+        "persistent_notification",
+        "create",
+        {
+            "title": "Tello — Segurança",
+            "message": "Bateria fraca",
+            "notification_id": "test-id",
+        },
+    )
+
+
+@patch("tello_bridge.controller.MqttBridge")
+@patch("tello_bridge.controller.HomeAssistantClient")
+@patch("tello_bridge.controller.TelloClient")
+def test_notify_security_skips_without_token(mock_tello, mock_ha, mock_mqtt):
+    mock_tello.return_value = MagicMock()
+    mock_ha.return_value = MagicMock()
+    mock_ha.return_value.token = ""
+    mock_mqtt.return_value = MagicMock()
+
+    ctrl = AppController(_cfg())
+    ctrl.notify_security("msg")
+    mock_ha.return_value.call_service.assert_not_called()
+
+
+@patch("tello_bridge.controller.MqttBridge")
+@patch("tello_bridge.controller.HomeAssistantClient")
+@patch("tello_bridge.controller.TelloClient")
+def test_mqtt_rejected_notifies_ha(mock_tello, mock_ha, mock_mqtt):
+    mock_tello.return_value = MagicMock()
+    mock_ha.return_value = MagicMock()
+    mock_ha.return_value.token = "tok"
+    mock_mqtt.return_value = MagicMock()
+
+    ctrl = AppController(_cfg())
+    ctrl._on_mqtt_rejected("tello/command")
+    args = mock_ha.return_value.call_service.call_args
+    assert args.args[0] == "persistent_notification"
+    assert args.args[2]["notification_id"] == "tello-security-mqtt-rejected"
+
+
+@patch("tello_bridge.controller.MqttBridge")
+@patch("tello_bridge.controller.HomeAssistantClient")
+@patch("tello_bridge.controller.TelloClient")
 def test_unknown_mqtt_command_ignored(mock_tello, mock_ha, mock_mqtt):
     tello = MagicMock()
     mock_tello.return_value = tello

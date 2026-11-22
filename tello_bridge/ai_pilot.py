@@ -58,6 +58,8 @@ class AIPilot:
         *,
         allowed_procedures: Iterable[str] | None = None,
         min_battery_pct: int = 15,
+        critical_battery_pct: int = 10,
+        on_security: Callable[[str, str], None] | None = None,
     ) -> None:
         self.tello = tello
         self.move_distance_cm = move_distance_cm
@@ -69,10 +71,14 @@ class AIPilot:
         # configurados podem ser disparados remotamente.
         self.allowed_procedures = frozenset(allowed_procedures or DEFAULT_PROCEDURES)
         self.min_battery_pct = min_battery_pct
+        self.critical_battery_pct = critical_battery_pct
+        self.on_security = on_security
         self.status = AIStatus()
         self._thread: threading.Thread | None = None
         self._cancel = threading.Event()
         self._lock = threading.Lock()
+        self._battery_notified = False
+        self._critical_notified = False
 
     @staticmethod
     def _safe_int(value: Any, default: int, lo: int, hi: int) -> int:
@@ -88,9 +94,47 @@ class AIPilot:
         if not t.connected:
             return False  # sem telemetria confiável, não bloquear
         try:
-            return int(t.battery) < self.min_battery_pct
+            low = int(t.battery) < self.min_battery_pct
         except (TypeError, ValueError):
             return False
+        if low:
+            self._check_battery_notifications()
+        else:
+            self._battery_notified = False
+            self._critical_notified = False
+        return low
+
+    def _check_battery_notifications(self) -> None:
+        """Notifica bateria fraca e bateria CRÍTICA (deduplicada)."""
+        t = self.tello.telemetry
+        if not t.connected:
+            return
+        try:
+            b = int(t.battery)
+        except (TypeError, ValueError):
+            return
+        if b < self.min_battery_pct and not self._battery_notified:
+            self._battery_notified = True
+            self._notify_security(
+                f"Bateria fraca: {b}% — abaixo do mínimo ({self.min_battery_pct}%)"
+            )
+        if (
+            b <= self.critical_battery_pct
+            and b < self.min_battery_pct
+            and not self._critical_notified
+        ):
+            self._critical_notified = True
+            self._notify_security(
+                f"Bateria CRÍTICA: {b}% — recarregue ou use o pouso de emergência!",
+                "critical",
+            )
+
+    def _notify_security(self, message: str, level: str = "warning") -> None:
+        if self.on_security:
+            try:
+                self.on_security(message, level)
+            except Exception:  # noqa: BLE001
+                logger.exception("handler de notificação de segurança")
 
     def set_active(self, active: bool) -> None:
         self.status.active = active
@@ -294,6 +338,7 @@ class AIPilot:
         self.status.message = message
         self._log(message)
         self._emit()
+        self._check_battery_notifications()
 
     def _sleep(self, deadline: float) -> None:
         end = min(time.time() + self.step_delay_s, deadline)

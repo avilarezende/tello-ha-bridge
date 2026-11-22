@@ -54,6 +54,7 @@ class MqttBridge:
         self.last_error = ""
         self._client = None
         self._on_command: Callable[[str, dict[str, Any]], None] | None = None
+        self._on_rejected: Callable[[str], None] | None = None
         self._lock = threading.Lock()
 
     @staticmethod
@@ -70,6 +71,9 @@ class MqttBridge:
         self, handler: Callable[[str, dict[str, Any]], None]
     ) -> None:
         self._on_command = handler
+
+    def set_rejected_handler(self, handler: Callable[[str], None] | None) -> None:
+        self._on_rejected = handler
 
     def connect(self) -> bool:
         if not self._command_token:
@@ -175,6 +179,11 @@ class MqttBridge:
             logger.warning(
                 "Comando MQTT rejeitado (token ausente/inválido) no tópico %s", topic
             )
+            if self._on_rejected:
+                try:
+                    self._on_rejected(topic)
+                except Exception:  # noqa: BLE001
+                    logger.exception("Falha no handler de comando rejeitado")
             return
         # Nunca repassa o token adiante (evita vazamento em logs/estado).
         clean = {k: v for k, v in payload.items() if k != "token"}

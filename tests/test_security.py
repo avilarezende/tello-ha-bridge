@@ -56,6 +56,14 @@ def test_mqtt_parse_payload_oversize_rejected():
     assert MqttBridge.parse_payload(b"x" * (MAX_PAYLOAD_BYTES + 1)) is None
 
 
+def test_mqtt_rejected_handler_called_on_missing_token():
+    bridge = MqttBridge(host="x", command_token="segredo")
+    rejected: list = []
+    bridge.set_rejected_handler(rejected.append)
+    bridge.handle_message("tello/command", {"value": "takeoff"})
+    assert rejected == ["tello/command"]
+
+
 def test_mqtt_handler_exception_does_not_propagate():
     bridge = MqttBridge(host="x")
 

@@ -202,6 +202,7 @@ TELLO_IP=192.168.10.1
 | `tello.move_distance_cm` | Passo dos botões/procedimentos | Ambientes pequenos → 20–30 |
 | `tello.investigate_height_cm` | Altura alvo na varredura | Tetos baixos → reduzir |
 | `tello.min_battery_pct` | Bateria mínima p/ decolar/proceder | Padrão 15 (segurança) |
+| `tello.critical_battery_pct` | Bateria CRÍTICA p/ alertar no HA | Padrão 10 (segurança) |
 | `ai.step_delay_s` | Pausa entre passos da IA | Mais tempo para câmera estabilizar |
 | `ai.procedure_timeout_s` | Tempo máximo de um procedimento | Missões longas |
 | `home_assistant.device_name` | Prefixo das entidades REST | Se quiser outro nome no HA |
@@ -514,6 +515,10 @@ O canal HA → app controla um **dispositivo físico**. Trate-o como superfície
 - Sanitiza o prefixo de tópico (sem `+`, `#`, `/`).
 - Só executa procedimentos listados em `ai.procedures` e comandos conhecidos.
 - Não registra tokens em log e não inclui corpos de resposta HTTP em erros.
+- **Alertas no Home Assistant**: bateria fraca (≤ `min_battery_pct`), bateria
+  CRÍTICA (≤ `critical_battery_pct`) e comandos MQTT rejeitados são entregues
+  como `persistent_notification` (se houver `HA_TOKEN`). Deduplicados — reflutuam
+  ao recarregar (ou até o drone sair da bateria baixa).
 
 ---
 

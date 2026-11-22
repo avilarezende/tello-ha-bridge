@@ -41,6 +41,8 @@ class AppController:
         )
         # Bateria mínima (%) para decolar ou iniciar procedimento de voo.
         self.min_battery_pct = int(tello_cfg.get("min_battery_pct", 15))
+        # Bateria CRÍTICA (%) para alertar no HA (persistent_notification).
+        self.critical_battery_pct = int(tello_cfg.get("critical_battery_pct", 10))
         self.ha = HomeAssistantClient(
             url=str(ha_cfg.get("url", "http://homeassistant.local:8123")),
             token=str(ha_cfg.get("token", "")),
@@ -68,6 +70,8 @@ class AppController:
             on_status=self._on_ai_status,
             allowed_procedures=ai_cfg.get("procedures"),
             min_battery_pct=self.min_battery_pct,
+            critical_battery_pct=self.critical_battery_pct,
+            on_security=self._on_ai_security,
         )
 
         self.mode = ControlMode.MANUAL
@@ -75,6 +79,7 @@ class AppController:
         self._publish_thread: threading.Thread | None = None
         self._listeners: list[Callable[[], None]] = []
         self.mqtt.set_command_handler(self._on_mqtt_command)
+        self.mqtt.set_rejected_handler(self._on_mqtt_rejected)
 
     def add_listener(self, cb: Callable[[], None]) -> None:
         self._listeners.append(cb)
@@ -142,6 +147,36 @@ class AppController:
         logger.warning(msg)
         self.ai.status.message = msg
         self._on_ai_status(self.ai.status)
+        self.notify_security(msg, notification_id="tello-security-battery")
+
+    def notify_security(
+        self, message: str, *, notification_id: str | None = None
+    ) -> None:
+        """Notificação persistente no Home Assistant para alertas de segurança."""
+        if not self.ha.token:
+            return
+        ok = self.ha.call_service(
+            "persistent_notification",
+            "create",
+            {
+                "title": "Tello — Segurança",
+                "message": message[:500],
+                "notification_id": notification_id or f"tello-security-{int(time.time())}",
+            },
+        )
+        if ok:
+            logger.info("Notificação de segurança enviada ao HA: %s", message[:80])
+
+    def _on_ai_security(self, message: str, level: str) -> None:
+        self.notify_security(message, notification_id=f"tello-security-ai-{level}")
+
+    def _on_mqtt_rejected(self, topic: str) -> None:
+        msg = (
+            f"Comando MQTT rejeitado no tópico {topic} — verifique "
+            "MQTT_COMMAND_TOKEN"
+        )
+        logger.warning(msg)
+        self.notify_security(msg, notification_id="tello-security-mqtt-rejected")
 
     def takeoff(self) -> bool:
         if not self.manual_allowed():

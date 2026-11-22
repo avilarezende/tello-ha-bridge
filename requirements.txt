@@ -1,11 +1,13 @@
-djitellopy>=2.5.0
-opencv-python>=4.8.0
-numpy>=1.24.0
-av>=10.0.0
-customtkinter>=5.2.0
-Pillow>=10.0.0
-requests>=2.31.0
-websocket-client>=1.7.0
-paho-mqtt>=2.0.0
-PyYAML>=6.0.1
-python-dotenv>=1.0.0
+# Versões com upper bound reduzem o risco de supply-chain (OWASP A06).
+# Para máxima reprodutibilidade, gere um lock: pip freeze > requirements.lock
+djitellopy>=2.5.0,<3.0
+opencv-python>=4.8.0,<5.0
+numpy>=1.24.0,<3.0
+av>=10.0.0,<20.0
+customtkinter>=5.2.0,<6.0
+Pillow>=10.0.0,<12.0
+requests>=2.32.0,<3.0
+websocket-client>=1.7.0,<2.0
+paho-mqtt>=2.0.0,<3.0
+PyYAML>=6.0.1,<7.0
+python-dotenv>=1.0.0,<2.0

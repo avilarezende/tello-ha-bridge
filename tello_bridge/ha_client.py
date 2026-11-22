@@ -23,12 +23,26 @@ class HAStatus:
 
 
 class HomeAssistantClient:
-    """Cliente REST simples do Home Assistant."""
+    """Cliente REST simples do Home Assistant.
 
-    def __init__(self, url: str, token: str, device_name: str = "tello_drone") -> None:
+    Segurança (OWASP A02): o token Bearer nunca é enviado em HTTP claro a menos
+    que ``allow_insecure_http=True`` seja passado explicitamente pelo usuário.
+    """
+
+    def __init__(
+        self,
+        url: str,
+        token: str,
+        device_name: str = "tello_drone",
+        *,
+        verify_tls: bool = True,
+        allow_insecure_http: bool = False,
+    ) -> None:
         self.url = url.rstrip("/")
         self.token = token or ""
         self.device_name = device_name
+        self.verify_tls = verify_tls
+        self.allow_insecure_http = allow_insecure_http
         self.status = HAStatus(url=self.url)
         self._session = requests.Session()
         if self.token:
@@ -39,20 +53,39 @@ class HomeAssistantClient:
                 }
             )
 
+    @property
+    def uses_plain_http(self) -> bool:
+        return self.url.lower().startswith("http://")
+
     def check_connection(self) -> bool:
+        self.status.last_check = time.time()
         if not self.token:
             self.status.connected = False
             self.status.last_error = "HA_TOKEN não configurado (.env)"
-            self.status.last_check = time.time()
             return False
+        if self.uses_plain_http and not self.allow_insecure_http:
+            self.status.connected = False
+            self.status.last_error = (
+                "HTTP claro recusado com token configurado — use https:// "
+                "ou ative 'home_assistant.allow_insecure_http' (risco!)"
+            )
+            logger.warning("HA: envio de token sobre HTTP claro recusado (%s)", self.url)
+            return False
+        if self.uses_plain_http:
+            logger.warning(
+                "HA: token Bearer trafegando em HTTP claro para %s — prefira https://",
+                self.url,
+            )
         try:
             t0 = time.perf_counter()
-            r = self._session.get(f"{self.url}/api/", timeout=5)
+            r = self._session.get(
+                f"{self.url}/api/", timeout=5, verify=self.verify_tls
+            )
             latency = (time.perf_counter() - t0) * 1000
             if r.status_code != 200:
                 self.status.connected = False
-                self.status.last_error = f"HTTP {r.status_code}: {r.text[:120]}"
-                self.status.last_check = time.time()
+                # Não inclui o corpo da resposta: pode conter dados sensíveis.
+                self.status.last_error = f"HTTP {r.status_code}"
                 return False
             data = r.json()
             self.status.connected = True
@@ -60,13 +93,11 @@ class HomeAssistantClient:
             self.status.version = str(data.get("version", ""))
             self.status.location_name = str(data.get("message", "API OK"))
             self.status.last_error = ""
-            self.status.last_check = time.time()
             self._refresh_related_states()
             return True
         except Exception as exc:  # noqa: BLE001
             self.status.connected = False
             self.status.last_error = str(exc)
-            self.status.last_check = time.time()
             logger.warning("HA offline: %s", exc)
             return False
 
@@ -80,7 +111,9 @@ class HomeAssistantClient:
         sample: dict[str, str] = {}
         for eid in entity_ids:
             try:
-                r = self._session.get(f"{self.url}/api/states/{eid}", timeout=3)
+                r = self._session.get(
+                    f"{self.url}/api/states/{eid}", timeout=3, verify=self.verify_tls
+                )
                 if r.status_code == 200:
                     st = r.json()
                     sample[eid] = str(st.get("state", "?"))
@@ -100,6 +133,7 @@ class HomeAssistantClient:
                 f"{self.url}/api/services/{domain}/{service}",
                 json=data or {},
                 timeout=8,
+                verify=self.verify_tls,
             )
             return r.status_code in (200, 201)
         except Exception as exc:  # noqa: BLE001
@@ -117,6 +151,7 @@ class HomeAssistantClient:
                 f"{self.url}/api/states/{entity_id}",
                 json=payload,
                 timeout=5,
+                verify=self.verify_tls,
             )
             return r.status_code in (200, 201)
         except Exception as exc:  # noqa: BLE001

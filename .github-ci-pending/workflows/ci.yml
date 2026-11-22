@@ -37,6 +37,13 @@ jobs:
       - name: Tests
         run: pytest -q --cov=tello_bridge --cov-report=term-missing
 
+      # OWASP A06: auditoria de vulnerabilidades das dependências.
+      # Começa informativo (continue-on-error); endureça removendo a linha
+      # "continue-on-error" após revisar as vulnerabilidades reportadas.
+      - name: Dependency audit (pip-audit)
+        continue-on-error: true
+        run: pip-audit
+
   docs:
     name: Docs & package sanity
     runs-on: ubuntu-latest

@@ -6,22 +6,37 @@ tello:
   move_distance_cm: 40
   # Altura alvo em procedimentos de investigação (cm)
   investigate_height_cm: 80
+  # Bateria mínima (%) para decolar ou iniciar procedimento de voo
+  min_battery_pct: 15
 
 home_assistant:
   url: "http://homeassistant.local:8123"
-  # Preferir HA_TOKEN no .env
+  # Preferir HA_TOKEN no .env — NUNCA commite segredos neste arquivo
   token: ""
   # Entidade base usada no pacote HA
   device_name: "tello_drone"
+  # Verificar certificado TLS do HA (desative só com certificado autoassinado local)
+  verify_tls: true
+  # PERIGO: permite enviar o token Bearer em HTTP claro. Prefira https://.
+  allow_insecure_http: false
 
 mqtt:
   host: "homeassistant.local"
   port: 1883
+  # Preferir MQTT_USER/MQTT_PASSWORD no .env — NUNCA commite segredos neste arquivo
   username: ""
   password: ""
   topic_prefix: "tello"
   # keep-alive segundos
   keepalive: 60
+  # TLS para o broker (normalmente porta 8883)
+  tls: false
+  # Só para teste local: aceita certificado inválido/autoassinado
+  tls_insecure: false
+  # Segredo compartilhado exigido em comandos HA -> app (campo "token" no JSON MQTT).
+  # Defina via MQTT_COMMAND_TOKEN no .env e use o MESMO valor nas automações do HA.
+  # Vazio = canal de comandos ABERTO (qualquer cliente do broker controla o drone).
+  command_token: ""
 
 ai:
   # Tempo máximo de um procedimento (segundos)

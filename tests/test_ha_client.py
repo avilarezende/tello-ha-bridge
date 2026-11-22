@@ -20,7 +20,10 @@ def test_check_connection_ok(mock_session_cls):
     resp.json.return_value = {"message": "API running.", "version": "2024.1.0"}
     session.get.return_value = resp
 
-    client = HomeAssistantClient("http://ha.local:8123", token="abc")
+    # http:// explícito só é aceito com allow_insecure_http=True (OWASP A02)
+    client = HomeAssistantClient(
+        "http://ha.local:8123", token="abc", allow_insecure_http=True
+    )
     # evita chamadas extras de states
     client._refresh_related_states = MagicMock()  # type: ignore[method-assign]
     assert client.check_connection() is True

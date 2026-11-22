@@ -6,12 +6,18 @@ import time
 from enum import Enum
 from typing import Any, Callable
 
-from tello_bridge.ai_pilot import AIPilot, AIStatus
+from tello_bridge.ai_pilot import KNOWN_COMMANDS, AIPilot, AIStatus
 from tello_bridge.ha_client import HomeAssistantClient
 from tello_bridge.mqtt_bridge import MqttBridge
 from tello_bridge.tello_client import TelloClient, TelloTelemetry
 
 logger = logging.getLogger(__name__)
+
+
+def _as_bool(value: Any) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "true", "yes", "on")
+    return bool(value)
 
 
 class ControlMode(str, Enum):
@@ -33,10 +39,14 @@ class AppController:
             ip=str(tello_cfg.get("ip", "192.168.10.1")),
             speed=int(tello_cfg.get("speed", 50)),
         )
+        # Bateria mínima (%) para decolar ou iniciar procedimento de voo.
+        self.min_battery_pct = int(tello_cfg.get("min_battery_pct", 15))
         self.ha = HomeAssistantClient(
             url=str(ha_cfg.get("url", "http://homeassistant.local:8123")),
             token=str(ha_cfg.get("token", "")),
             device_name=str(ha_cfg.get("device_name", "tello_drone")),
+            verify_tls=_as_bool(ha_cfg.get("verify_tls", True)),
+            allow_insecure_http=_as_bool(ha_cfg.get("allow_insecure_http", False)),
         )
         self.mqtt = MqttBridge(
             host=str(mqtt_cfg.get("host", "homeassistant.local")),
@@ -45,6 +55,9 @@ class AppController:
             password=str(mqtt_cfg.get("password", "")),
             topic_prefix=str(mqtt_cfg.get("topic_prefix", "tello")),
             keepalive=int(mqtt_cfg.get("keepalive", 60)),
+            use_tls=_as_bool(mqtt_cfg.get("tls", False)),
+            tls_insecure=_as_bool(mqtt_cfg.get("tls_insecure", False)),
+            command_token=str(mqtt_cfg.get("command_token", "") or ""),
         )
         self.ai = AIPilot(
             tello=self.tello,
@@ -53,6 +66,8 @@ class AppController:
             step_delay_s=float(ai_cfg.get("step_delay_s", 2.0)),
             procedure_timeout_s=float(ai_cfg.get("procedure_timeout_s", 120)),
             on_status=self._on_ai_status,
+            allowed_procedures=ai_cfg.get("procedures"),
+            min_battery_pct=self.min_battery_pct,
         )
 
         self.mode = ControlMode.MANUAL
@@ -119,8 +134,20 @@ class AppController:
     def manual_allowed(self) -> bool:
         return self.mode == ControlMode.MANUAL
 
+    def _reject_low_battery(self, what: str) -> None:
+        msg = (
+            f"Bateria {self.tello.telemetry.battery}% abaixo do mínimo "
+            f"({self.min_battery_pct}%) — {what} bloqueado(a)"
+        )
+        logger.warning(msg)
+        self.ai.status.message = msg
+        self._on_ai_status(self.ai.status)
+
     def takeoff(self) -> bool:
         if not self.manual_allowed():
+            return False
+        if self.ai.battery_low():
+            self._reject_low_battery("decolagem")
             return False
         ok = self.tello.takeoff()
         self._notify()
@@ -149,6 +176,9 @@ class AppController:
         return self.tello.move(direction, cm)
 
     def start_ai_procedure(self, name: str) -> None:
+        if name != "land_safe" and self.ai.battery_low():
+            self._reject_low_battery(f"procedimento {name}")
+            return
         if self.mode != ControlMode.AI:
             self.set_mode(ControlMode.AI)
         self.ai.start_procedure(name)
@@ -160,7 +190,10 @@ class AppController:
 
     def _on_mqtt_command(self, kind: str, payload: dict[str, Any]) -> None:
         # kind vem do último segmento: command | procedure | mode
-        logger.info("MQTT %s %s", kind, payload)
+        logger.info("MQTT %s %s", kind, str(payload)[:200])
+        if not isinstance(payload, dict):
+            logger.warning("Payload MQTT inválido ignorado (%s)", type(payload).__name__)
+            return
         if kind == "mode":
             value = str(payload.get("value", "")).lower()
             if value in ("manual", "ai"):
@@ -170,6 +203,10 @@ class AppController:
             return
         if kind == "command":
             cmd = str(payload.get("value") or payload.get("cmd") or "").lower()
+            # Defesa em profundidade: só comandos conhecidos passam.
+            if cmd not in KNOWN_COMMANDS:
+                logger.warning("Comando MQTT desconhecido ignorado: %r", cmd)
+                return
             # segurança: land/emergency sempre
             if cmd in ("land", "emergency"):
                 getattr(self.tello, cmd)()

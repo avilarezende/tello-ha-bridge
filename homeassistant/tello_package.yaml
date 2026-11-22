@@ -2,6 +2,12 @@
 # Copie para config/packages/tello_drone.yaml (habilite packages no configuration.yaml)
 #
 # O app publica estados via REST e MQTT. Use estes helpers para enviar ordens.
+#
+# SEGURANÇA: se você definiu MQTT_COMMAND_TOKEN no app (recomendado), inclua o
+# MESMO valor no campo "token" de cada payload abaixo, por exemplo:
+#   payload_template: '{"value": "...", "token": "SEU_TOKEN_LONGO_ALEATORIO"}'
+# Sem token configurado no app, o canal de comandos fica aberto a qualquer
+# cliente do broker — mantenha o broker restrito à LAN nesse caso.
 
 input_select:
   tello_mode:

@@ -68,3 +68,31 @@ mqtt:
     assert cfg["mqtt"]["host"] == "new-mqtt"
     assert cfg["mqtt"]["port"] == 1884
     assert cfg["tello"]["ip"] == "10.0.0.9"
+
+
+def test_invalid_mqtt_port_falls_back_to_default(tmp_path: Path, monkeypatch):
+    cfg_file = tmp_path / "config.yaml"
+    cfg_file.write_text("mqtt:\n  host: x\n", encoding="utf-8")
+    monkeypatch.setenv("MQTT_PORT", "abc")
+
+    cfg = load_config(cfg_file)
+    assert cfg["mqtt"]["port"] == 1883
+
+
+def test_security_env_overrides(tmp_path: Path, monkeypatch):
+    cfg_file = tmp_path / "config.yaml"
+    cfg_file.write_text("mqtt:\n  host: x\n", encoding="utf-8")
+    monkeypatch.setenv("MQTT_TLS", "true")
+    monkeypatch.setenv("MQTT_TLS_INSECURE", "false")
+    monkeypatch.setenv("MQTT_COMMAND_TOKEN", "tok123")
+    monkeypatch.setenv("HA_VERIFY_TLS", "false")
+    monkeypatch.setenv("HA_ALLOW_INSECURE_HTTP", "true")
+    monkeypatch.setenv("MIN_BATTERY_PCT", "25")
+
+    cfg = load_config(cfg_file)
+    assert cfg["mqtt"]["tls"] is True
+    assert cfg["mqtt"]["tls_insecure"] is False
+    assert cfg["mqtt"]["command_token"] == "tok123"
+    assert cfg["home_assistant"]["verify_tls"] is False
+    assert cfg["home_assistant"]["allow_insecure_http"] is True
+    assert cfg["tello"]["min_battery_pct"] == 25

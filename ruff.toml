@@ -2,8 +2,12 @@ line-length = 100
 target-version = "py310"
 
 [lint]
-select = ["E", "F", "I", "W"]
-ignore = ["E501"]
+# "S" = regras de segurança (bandit) — OWASP: análise estática contínua
+select = ["E", "F", "I", "W", "S"]
+# S110/S112: try/except silencioso é padrão deliberado nos loops de rede e
+# telemetria (threads daemon não devem morrer por falhas transitórias de I/O).
+ignore = ["E501", "S110", "S112"]
 
 [lint.per-file-ignores]
-"tests/*" = ["F401"]
+# S105/S106: segredos-fake de teste (sensores usados como sentinels, não senhas reais).
+"tests/*" = ["F401", "S101", "S105", "S106"]

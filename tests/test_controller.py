@@ -90,3 +90,64 @@ def test_mqtt_mode_command(mock_tello, mock_ha, mock_mqtt):
     ctrl = AppController(_cfg())
     ctrl._on_mqtt_command("mode", {"value": "ai"})
     assert ctrl.mode == ControlMode.AI
+
+
+@patch("tello_bridge.controller.MqttBridge")
+@patch("tello_bridge.controller.HomeAssistantClient")
+@patch("tello_bridge.controller.TelloClient")
+def test_takeoff_blocked_on_low_battery(mock_tello, mock_ha, mock_mqtt):
+    tello = MagicMock()
+    tello.telemetry.connected = True
+    tello.telemetry.battery = 5
+    mock_tello.return_value = tello
+    mock_mqtt.return_value = MagicMock()
+    mock_ha.return_value = MagicMock()
+
+    ctrl = AppController(_cfg())  # min_battery_pct padrão: 15
+    assert ctrl.takeoff() is False
+    tello.takeoff.assert_not_called()
+
+
+@patch("tello_bridge.controller.MqttBridge")
+@patch("tello_bridge.controller.HomeAssistantClient")
+@patch("tello_bridge.controller.TelloClient")
+def test_takeoff_allowed_with_good_battery(mock_tello, mock_ha, mock_mqtt):
+    tello = MagicMock()
+    tello.telemetry.connected = True
+    tello.telemetry.battery = 80
+    tello.takeoff.return_value = True
+    mock_tello.return_value = tello
+    mock_mqtt.return_value = MagicMock()
+    mock_ha.return_value = MagicMock()
+
+    ctrl = AppController(_cfg())
+    assert ctrl.takeoff() is True
+    tello.takeoff.assert_called_once()
+
+
+@patch("tello_bridge.controller.MqttBridge")
+@patch("tello_bridge.controller.HomeAssistantClient")
+@patch("tello_bridge.controller.TelloClient")
+def test_unknown_mqtt_command_ignored(mock_tello, mock_ha, mock_mqtt):
+    tello = MagicMock()
+    mock_tello.return_value = tello
+    mock_mqtt.return_value = MagicMock()
+    mock_ha.return_value = MagicMock()
+
+    ctrl = AppController(_cfg())
+    ctrl._on_mqtt_command("command", {"value": "self_destruct"})
+    tello.land.assert_not_called()
+    tello.emergency.assert_not_called()
+
+
+@patch("tello_bridge.controller.MqttBridge")
+@patch("tello_bridge.controller.HomeAssistantClient")
+@patch("tello_bridge.controller.TelloClient")
+def test_malformed_mqtt_payload_does_not_crash(mock_tello, mock_ha, mock_mqtt):
+    mock_tello.return_value = MagicMock()
+    mock_mqtt.return_value = MagicMock()
+    mock_ha.return_value = MagicMock()
+
+    ctrl = AppController(_cfg())
+    # não deve lançar exceção
+    ctrl._on_mqtt_command("command", "nao-e-dict")

@@ -4,12 +4,33 @@ import logging
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Any, Callable, Iterable
 
 if TYPE_CHECKING:
     from tello_bridge.tello_client import TelloClient
 
 logger = logging.getLogger(__name__)
+
+# Procedimentos conhecidos pelo app (usado quando a config não define a lista).
+DEFAULT_PROCEDURES = ("hover_scan", "square_patrol", "forward_investigate", "land_safe")
+
+# Comandos de voo aceitos via ordens remotas (defesa em profundidade).
+KNOWN_COMMANDS = frozenset(
+    {
+        "takeoff",
+        "land",
+        "hover",
+        "emergency",
+        "forward",
+        "back",
+        "left",
+        "right",
+        "up",
+        "down",
+        "cw",
+        "ccw",
+    }
+)
 
 
 @dataclass
@@ -34,6 +55,9 @@ class AIPilot:
         step_delay_s: float = 2.0,
         procedure_timeout_s: float = 120.0,
         on_status: Callable[[AIStatus], None] | None = None,
+        *,
+        allowed_procedures: Iterable[str] | None = None,
+        min_battery_pct: int = 15,
     ) -> None:
         self.tello = tello
         self.move_distance_cm = move_distance_cm
@@ -41,10 +65,32 @@ class AIPilot:
         self.step_delay_s = step_delay_s
         self.procedure_timeout_s = procedure_timeout_s
         self.on_status = on_status
+        # A01 (defesa em profundidade): só procedimentos explicitamente
+        # configurados podem ser disparados remotamente.
+        self.allowed_procedures = frozenset(allowed_procedures or DEFAULT_PROCEDURES)
+        self.min_battery_pct = min_battery_pct
         self.status = AIStatus()
         self._thread: threading.Thread | None = None
         self._cancel = threading.Event()
         self._lock = threading.Lock()
+
+    @staticmethod
+    def _safe_int(value: Any, default: int, lo: int, hi: int) -> int:
+        """Converte para int com fallback e clamp — nunca lança exceção."""
+        try:
+            return max(lo, min(hi, int(value)))
+        except (TypeError, ValueError):
+            return default
+
+    def battery_low(self) -> bool:
+        """True quando há telemetria e a bateria está abaixo do mínimo seguro."""
+        t = self.tello.telemetry
+        if not t.connected:
+            return False  # sem telemetria confiável, não bloquear
+        try:
+            return int(t.battery) < self.min_battery_pct
+        except (TypeError, ValueError):
+            return False
 
     def set_active(self, active: bool) -> None:
         self.status.active = active
@@ -66,8 +112,11 @@ class AIPilot:
 
     def handle_order(self, kind: str, payload: dict) -> None:
         """kind: command | procedure | mode"""
-        self.status.last_order = f"{kind}:{payload}"
-        self._log(f"Ordem recebida: {kind} {payload}")
+        if not isinstance(payload, dict):
+            self._log(f"Ordem ignorada — payload inválido: {type(payload).__name__}")
+            return
+        self.status.last_order = f"{kind}:{str(payload)[:200]}"
+        self._log(f"Ordem recebida: {kind} {str(payload)[:200]}")
 
         if kind == "mode":
             value = str(payload.get("value", "")).lower()
@@ -89,6 +138,20 @@ class AIPilot:
             self._run_single_command(cmd, payload)
 
     def start_procedure(self, name: str) -> None:
+        name = (name or "").strip()
+        if name not in self.allowed_procedures:
+            self.status.message = f"Procedimento desconhecido/não permitido: {name or '(vazio)'}"
+            self._log(self.status.message)
+            self._emit()
+            return
+        if name != "land_safe" and self.battery_low():
+            self.status.message = (
+                f"Bateria fraca ({self.tello.telemetry.battery}% < "
+                f"{self.min_battery_pct}%) — {name} bloqueado"
+            )
+            self._log(self.status.message)
+            self._emit()
+            return
         with self._lock:
             if self.status.running:
                 self.cancel()
@@ -105,8 +168,19 @@ class AIPilot:
             self._thread.start()
 
     def _run_single_command(self, cmd: str, payload: dict) -> None:
-        dist = int(payload.get("cm", self.move_distance_cm))
-        deg = int(payload.get("degrees", 90))
+        # Valores vindos da rede são sanitizados com clamp (20-500 cm, 1-360°).
+        dist = self._safe_int(payload.get("cm"), self.move_distance_cm, 20, 500)
+        deg = self._safe_int(payload.get("degrees"), 90, 1, 360)
+        if cmd not in KNOWN_COMMANDS:
+            self._log(f"Comando desconhecido: {cmd!r}")
+            return
+        if cmd == "takeoff" and self.battery_low():
+            self.status.message = (
+                f"Bateria fraca ({self.tello.telemetry.battery}%) — decolagem bloqueada"
+            )
+            self._log(self.status.message)
+            self._emit()
+            return
         actions = {
             "takeoff": self.tello.takeoff,
             "land": self.tello.land,
@@ -121,13 +195,14 @@ class AIPilot:
             "cw": lambda: self.tello.rotate_cw(deg),
             "ccw": lambda: self.tello.rotate_ccw(deg),
         }
-        fn = actions.get(cmd)
-        if not fn:
-            self._log(f"Comando desconhecido: {cmd}")
-            return
+        fn = actions[cmd]
         self.status.message = f"Executando {cmd}"
         self._emit()
-        ok = fn()
+        try:
+            ok = fn()
+        except Exception as exc:  # noqa: BLE001
+            self._log(f"{cmd}: erro {exc}")
+            return
         self._log(f"{cmd}: {'ok' if ok else 'falhou'}")
 
     def _run_procedure(self, name: str) -> None:
@@ -151,9 +226,13 @@ class AIPilot:
         finally:
             self.tello.hover()
             self.status.running = False
-            self.status.step = "done"
-            if "Erro" not in self.status.message and "desconhecido" not in self.status.message:
-                self.status.message = f"Concluído: {name}"
+            if self._cancel.is_set():
+                # Não sobrescreve o cancelamento com "Concluído".
+                self.status.step = "cancelled"
+            else:
+                self.status.step = "done"
+                if "Erro" not in self.status.message and "desconhecido" not in self.status.message:
+                    self.status.message = f"Concluído: {name}"
             self._emit()
 
     def _proc_hover_scan(self, deadline: float) -> None:

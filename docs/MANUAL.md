@@ -201,10 +201,15 @@ TELLO_IP=192.168.10.1
 | `tello.speed` | Velocidade RC 0–100 | Voo mais suave/agressivo |
 | `tello.move_distance_cm` | Passo dos botões/procedimentos | Ambientes pequenos → 20–30 |
 | `tello.investigate_height_cm` | Altura alvo na varredura | Tetos baixos → reduzir |
+| `tello.min_battery_pct` | Bateria mínima p/ decolar/proceder | Padrão 15 (segurança) |
 | `ai.step_delay_s` | Pausa entre passos da IA | Mais tempo para câmera estabilizar |
 | `ai.procedure_timeout_s` | Tempo máximo de um procedimento | Missões longas |
 | `home_assistant.device_name` | Prefixo das entidades REST | Se quiser outro nome no HA |
+| `home_assistant.verify_tls` | Verificar certificado do HA | `false` só p/ cert autoassinado |
+| `home_assistant.allow_insecure_http` | Permite token em HTTP claro | **Evite** — prefira https:// |
 | `mqtt.topic_prefix` | Prefixo dos tópicos | Deve bater com as automações HA |
+| `mqtt.tls` / `mqtt.tls_insecure` | TLS do broker / aceitar cert inválido | Produção: `tls: true` |
+| `mqtt.command_token` | Segredo exigido nos comandos | **Recomendado** — veja §12 |
 
 ### 5.4 Gerar o token no Home Assistant
 
@@ -431,6 +436,9 @@ Para adicionar um novo: implemente em `tello_bridge/ai_pilot.py`, liste em `conf
 | `tello/connected` | app → HA | `ON` / `OFF` |
 | `tello/ai/status` | app → HA | `{"message":"...","step":"..."}` |
 
+**Com `MQTT_COMMAND_TOKEN` definido**, todo payload HA → app precisa incluir
+`"token": "<mesmo valor>"`, ex.: `{"value":"land","token":"abc123..."}`.
+
 Se mudar `MQTT_TOPIC_PREFIX` para `drone1`, altere **todas** as automações do pacote para `drone1/...`.
 
 ---
@@ -469,11 +477,43 @@ Antes de operar com IA remota, confira:
 
 ## 12. Segurança
 
+### 12.1 Segurança física (voo)
+
 - Área livre, sem pessoas sob o drone.
-- Bateria > 20% para procedimentos longos.
+- Bateria > 20% para procedimentos longos. O app **bloqueia decolagem e
+  procedimentos de voo** abaixo de `tello.min_battery_pct` (padrão 15%);
+  `land_safe` sempre é permitido.
 - Sempre saiba onde está o botão **Emergência**.
-- Não exponha `HA_TOKEN` nem senha MQTT no GitHub (use só `.env` local).
-- Em ambientes internos, restrinja o broker MQTT à LAN.
+
+### 12.2 Segurança de software (checklist alinhado ao OWASP)
+
+O canal HA → app controla um **dispositivo físico**. Trate-o como superfície de ataque:
+
+- [ ] **A01 — Controle de acesso:** defina `MQTT_COMMAND_TOKEN` no `.env` com um valor
+      longo e aleatório (ex.: 32+ caracteres). O app rejeita qualquer comando MQTT
+      sem o campo `"token"` correspondente. Use o mesmo valor nas automações do HA
+      (veja o cabeçalho de `homeassistant/tello_package.yaml`).
+- [ ] **A02 — Criptografia:** prefira `https://` no `HA_URL` (o app **recusa** enviar
+      o token em HTTP claro, salvo `allow_insecure_http: true`). Ative TLS no broker
+      (`mqtt.tls: true`, porta 8883); sem isso, credenciais trafegam em claro na LAN.
+- [ ] **A05 — Configuração:** restrinja o broker MQTT à LAN (firewall), exija
+      usuário/senha no Mosquitto e desative acesso anônimo. Nunca exponha as portas
+      8123/1883 na internet sem VPN. Segredos **somente** no `.env` (nunca no
+      `config.yaml`, que é versionado — o app avisa em log se encontrar).
+- [ ] **A06 — Componentes:** dependências têm upper bounds no `requirements.txt`;
+      rode `pip-audit` (está no CI) e atualize com frequência.
+- [ ] **A09 — Logs:** o app registra comandos rejeitados e avisos de canal aberto
+      (sem token/TLS). Revise os logs ao operar.
+- [ ] **Rede do drone:** o SDK UDP do Tello (8889/8890/11111) não tem autenticação —
+      qualquer host na mesma rede pode enviar comandos. Use Wi‑Fi com WPA2/WPA3 e,
+      no EDU em Station Mode, considere uma VLAN/SSID isolada para IoT.
+
+### 12.3 O que o app faz por você
+
+- Valida e limita todo payload MQTT (máx. 4 KB; `cm` 20–500; `degrees` 1–360).
+- Sanitiza o prefixo de tópico (sem `+`, `#`, `/`).
+- Só executa procedimentos listados em `ai.procedures` e comandos conhecidos.
+- Não registra tokens em log e não inclui corpos de resposta HTTP em erros.
 
 ---
 

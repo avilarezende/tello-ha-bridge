@@ -494,13 +494,19 @@ O canal HA → app controla um **dispositivo físico**. Trate-o como superfície
       longo e aleatório (ex.: 32+ caracteres). O app rejeita qualquer comando MQTT
       sem o campo `"token"` correspondente. Use o mesmo valor nas automações do HA
       (veja o cabeçalho de `homeassistant/tello_package.yaml`).
-- [ ] **A02 — Criptografia:** prefira `https://` no `HA_URL` (o app **recusa** enviar
-      o token em HTTP claro, salvo `allow_insecure_http: true`). Ative TLS no broker
-      (`mqtt.tls: true`, porta 8883); sem isso, credenciais trafegam em claro na LAN.
+- [ ] **A02 — Criptografia:**
+      - **HA:** use **`https://` no `HA_URL`** (o app *recusa* enviar o token em
+        HTTP claro, salvo `allow_insecure_http: true`). Com Nginx Proxy Manager +
+        DuckDNS + Cloudflare no DNS, o dashboard do HA sai https de graça — não
+        mexa nas automações internas: o drone usa SDK UDP, não HTTP.
+      - **MQTT:** **`mqtt.tls: true`** no app (ex.: Mosquitto com TLS na porta
+        8883, equivale a `MQTT_TLS=true`). Sem TLS, credenciais trafegam em
+        claro na LAN.
 - [ ] **A05 — Configuração:** restrinja o broker MQTT à LAN (firewall), exija
-      usuário/senha no Mosquitto e desative acesso anônimo. Nunca exponha as portas
-      8123/1883 na internet sem VPN. Segredos **somente** no `.env` (nunca no
-      `config.yaml`, que é versionado — o app avisa em log se encontrar).
+      usuário/senha no Mosquitto e desative acesso anônimo. Nunca exponha as
+      portas 8123/1883 na internet sem VPN. Segredos **somente** no `.env`
+      (nunca no `config.yaml`, que é versionado — o app avisa em log se
+      encontrar).
 - [ ] **A06 — Componentes:** dependências têm upper bounds no `requirements.txt`;
       rode `pip-audit` (está no CI) e atualize com frequência.
 - [ ] **A09 — Logs:** o app registra comandos rejeitados e avisos de canal aberto
